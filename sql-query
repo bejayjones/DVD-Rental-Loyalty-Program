@@ -1,0 +1,86 @@
+--Delete the table if it already exists, if it does not exist create the detailed table where we will store all the detailed information
+DELETE FROM detailedreport;
+DROP TABLE IF EXISTS detailedreport;
+CREATE TABLE detailedreport(
+	customer_id int,
+	customer_name varchar(180),
+	email varchar(90),
+	address_id int,
+	rental_id int,
+	rental_date timestamp,
+	return_date timestamp
+);
+
+--Insert the data into the detailed report from the customer and rental tables
+INSERT INTO detailedreport(
+	customer_id,
+	customer_name,
+	email,
+	address_id,
+	rental_id,
+	rental_date,
+	return_date
+	)
+SELECT customer.customer_id, concat(customer.first_name, ' ', customer.last_name) AS customer_name, customer.email, customer.address_id, rental.rental_id, rental.rental_date, rental.return_date
+FROM rental
+INNER JOIN customer ON rental.customer_id = customer.customer_id;
+
+--Display detailed report
+SELECT * FROM detailedreport;
+
+--Delete the summary table if it already exists, then create the table that will hold the summary information
+DROP TABLE IF EXISTS summaryreport;
+CREATE TABLE summaryreport(
+	customer_name varchar(180),
+	email varchar(90),
+	rental_count int
+);
+
+CREATE OR REPLACE FUNCTION refresh_summaryreport()
+RETURNS TRIGGER
+AS $$
+BEGIN
+	--Clear the table before insertion
+	DELETE FROM summaryreport;
+	--Populate the summary table from detailed table
+	INSERT INTO summaryreport(
+		SELECT customer_name, email, COUNT(customer_id) AS rental_count
+		FROM detailedreport
+		GROUP BY customer_name, email
+		ORDER BY rental_count DESC
+	);
+
+	RETURN NEW;
+END;
+$$ LANGUAGE PLPGSQL;
+--Create the trigger that will detect updates from the detailedreport and call the refresh trigger function
+CREATE TRIGGER update_detailedreport
+AFTER INSERT 
+ON detailedreport
+FOR EACH STATEMENT
+EXECUTE PROCEDURE refresh_summaryreport();
+
+--the stored procedure that will refresh the detailedreport, effectively refreshing the summmaryreport as well
+--This stored procedure should be ran routinely once every three months to ensure data freshness
+CREATE OR REPLACE PROCEDURE refresh_detailedreport()
+AS $$
+BEGIN
+DELETE FROM detailedreport;
+INSERT INTO detailedreport(
+	customer_id,
+	customer_name,
+	email,
+	address_id,
+	rental_id,
+	rental_date,
+	return_date
+	)
+SELECT customer.customer_id, concat(customer.first_name, ' ', customer.last_name) AS customer_name, customer.email, customer.address_id, rental.rental_id, rental.rental_date, rental.return_date
+FROM rental
+INNER JOIN customer ON rental.customer_id = customer.customer_id;
+END;
+$$ LANGUAGE PLPGSQL;
+
+CALL refresh_detailedreport();
+--SELECT * FROM summaryreport;
+--SELECT * FROM detailedreport;
